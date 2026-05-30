@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m", "streamlit", "run", "dashboard.py",
+        "--server.headless", "true",
+        "--browser.gatherUsageStats", "false",
+        "--", "--mock"
+      ],
+      "port": 8501,
+      "autoPort": false
+    }
+  ]
+}
