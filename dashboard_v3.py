@@ -14,7 +14,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
-MOCK_MODE = "--mock" in sys.argv
+MOCK_MODE = "--mock" in sys.argv or not os.environ.get("DATABASE_URL")
 
 st.set_page_config(
     page_title="Marasoft KPI v3",
