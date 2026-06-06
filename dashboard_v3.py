@@ -165,7 +165,7 @@ def load_data():
         try:
             return _api_data()
         except Exception as _e:
-            st.warning(f"⚠️ API Marasoft inaccessible ({_e!s:.120}) — affichage en mode démo.")
+            st.warning(f"⚠️ API Marasoft inaccessible ({type(_e).__name__}: {_e!s:.200}) — affichage en mode démo.")
             return _mock_data()
     try:
         return _pg_data()
