@@ -25,7 +25,7 @@ def get_client() -> httpx.Client:
         _client = httpx.Client(
             base_url=settings.api_base_url,
             headers={
-                "Authorization": f"Bearer {settings.api_key}",
+                "ApiKey": settings.api_key,
                 "Content-Type": "application/json",
                 "Accept": "application/json",
             },
