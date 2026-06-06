@@ -162,8 +162,16 @@ def load_data():
     if MOCK_MODE:
         return _mock_data()
     if API_KEY and not os.environ.get("DATABASE_URL"):
-        return _api_data()
-    return _pg_data()
+        try:
+            return _api_data()
+        except Exception as _e:
+            st.warning(f"⚠️ API Marasoft inaccessible ({_e!s:.120}) — affichage en mode démo.")
+            return _mock_data()
+    try:
+        return _pg_data()
+    except Exception as _e:
+        st.warning(f"⚠️ Base de données inaccessible ({_e!s:.120}) — affichage en mode démo.")
+        return _mock_data()
 
 def _pg_data():
     from sqlalchemy import create_engine, text
