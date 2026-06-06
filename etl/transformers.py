@@ -78,13 +78,13 @@ def _rest_severity(deficit: float) -> str:
 def transform_vessels(raw: List[Dict]) -> List[Dict]:
     out = []
     for r in raw:
-        vessel_id = _get(r, "vesselId", "VesselId", "id", "Id")
+        vessel_id = _get(r, "vesselId", "VesselId", "id", "Id", "Number", "number")
         if not vessel_id:
             continue
         out.append({
             "vessel_id":  str(vessel_id),
             "name":       _get(r, "name", "Name", "vesselName", "VesselName"),
-            "imo_number": _get(r, "imoNumber", "IMONumber", "imo"),
+            "imo_number": _get(r, "imoNumber", "IMONumber", "imo", "Number", "number"),
             "flag":       _get(r, "flag", "Flag", "flagState"),
             "synced_at":  datetime.utcnow(),
         })
