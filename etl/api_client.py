@@ -93,7 +93,7 @@ def get(path: str, params: Optional[Dict[str, Any]] = None) -> Any:
             time.sleep(wait)
             last_exc = exc
 
-    raise RuntimeError(f"Échec après {settings.api_max_retries} tentatives sur {path}") from last_exc
+    raise RuntimeError(f"Échec après {settings.api_max_retries} tentatives sur {path} — dernière erreur: {type(last_exc).__name__}: {last_exc}") from last_exc
 
 
 def get_paginated(path: str, params: Optional[Dict[str, Any]] = None) -> List[Dict]:
