@@ -14,7 +14,8 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import streamlit as st
 
-MOCK_MODE = "--mock" in sys.argv or not os.environ.get("DATABASE_URL")
+API_KEY  = os.environ.get("MARASOFT_API_KEY", "")
+MOCK_MODE = "--mock" in sys.argv or (not os.environ.get("DATABASE_URL") and not API_KEY)
 
 st.set_page_config(
     page_title="Marasoft KPI v3",
@@ -160,6 +161,8 @@ st.markdown(f"""
 def load_data():
     if MOCK_MODE:
         return _mock_data()
+    if API_KEY and not os.environ.get("DATABASE_URL"):
+        return _api_data()
     return _pg_data()
 
 def _pg_data():
@@ -189,6 +192,151 @@ def _pg_data():
         """), conn)
     return dict(kpi=kpi, certs=certs, jobs=jobs, hours=hours, violations=violations,
                 parts=parts, qhse=qhse, voyages=voyages, crew=crew)
+
+
+def _api_data():
+    """Charge les données directement depuis l'API Marasoft (sans PostgreSQL)."""
+    import sys as _sys, os as _os
+    _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+
+    from etl.extractors import (
+        extract_vessels, extract_components, extract_running_hours,
+        extract_maintenance_jobs, extract_certificates, extract_qhse_reports,
+        extract_crew_members, extract_rest_hours, extract_voyages, extract_parts,
+    )
+    from etl.transformers import (
+        transform_vessels, transform_components, transform_running_hours,
+        transform_maintenance_jobs, transform_certificates, transform_qhse_reports,
+        transform_crew_members, transform_rest_hours, transform_voyages, transform_parts,
+    )
+
+    today = date.today()
+
+    # ── Référentiels ──────────────────────────────────────────────────────────
+    vessels_df = pd.DataFrame(transform_vessels(extract_vessels()))
+    if vessels_df.empty:
+        return _mock_data()  # Fallback si l'API ne répond pas
+    vessels_df = vessels_df.rename(columns={"name": "vessel_name"})
+
+    comps_df = pd.DataFrame(transform_components(extract_components()))
+
+    def _add_vessel_name(df):
+        if df.empty or vessels_df.empty:
+            return df
+        return df.merge(vessels_df[["vessel_id", "vessel_name"]], on="vessel_id", how="left")
+
+    # ── Heures moteur ─────────────────────────────────────────────────────────
+    hours_df = pd.DataFrame(transform_running_hours(extract_running_hours(full_load=True)))
+    if not hours_df.empty:
+        hours_df = _add_vessel_name(hours_df)
+        if not comps_df.empty:
+            hours_df = hours_df.merge(
+                comps_df[["component_id", "name"]].rename(columns={"name": "component_name"}),
+                on="component_id", how="left",
+            )
+        hours_df["recorded_at"] = pd.to_datetime(hours_df["recorded_at"])
+        hours_df = hours_df.sort_values("recorded_at")
+
+    # ── Maintenance ───────────────────────────────────────────────────────────
+    jobs_raw = pd.DataFrame(transform_maintenance_jobs(extract_maintenance_jobs(full_load=False)))
+    jobs_df  = pd.DataFrame()
+    if not jobs_raw.empty:
+        jobs_open = jobs_raw[jobs_raw["status"] != "done"].copy()
+        jobs_df   = _add_vessel_name(jobs_open)
+        jobs_df["due_date"] = pd.to_datetime(jobs_df["due_date"])
+
+    # ── Certificats ───────────────────────────────────────────────────────────
+    certs_df = pd.DataFrame(transform_certificates(extract_certificates()))
+    if not certs_df.empty:
+        certs_df = _add_vessel_name(certs_df)
+
+    # ── Violations MLC (30 derniers jours) ────────────────────────────────────
+    rest_raw  = pd.DataFrame(transform_rest_hours(extract_rest_hours(full_load=False)))
+    viol_df   = pd.DataFrame()
+    if not rest_raw.empty:
+        cutoff   = today - timedelta(days=30)
+        rest_raw["period_date"] = pd.to_datetime(rest_raw["period_date"]).dt.date
+        viol_df  = _add_vessel_name(rest_raw[rest_raw["period_date"] >= cutoff].copy())
+        # Enrichissement nom du marin
+        crew_raw = pd.DataFrame(transform_crew_members(extract_crew_members()))
+        if not crew_raw.empty:
+            crew_raw["crew_name"] = crew_raw["first_name"].fillna("") + " " + crew_raw["last_name"].fillna("")
+            viol_df = viol_df.merge(
+                crew_raw[["crew_member_id", "crew_name", "rank"]], on="crew_member_id", how="left"
+            )
+
+    # ── QHSE ─────────────────────────────────────────────────────────────────
+    qhse_df = pd.DataFrame(transform_qhse_reports(extract_qhse_reports()))
+    if not qhse_df.empty:
+        qhse_df = _add_vessel_name(qhse_df[qhse_df["status"] != "closed"].copy())
+
+    # ── Stock ─────────────────────────────────────────────────────────────────
+    parts_df = pd.DataFrame(transform_parts(extract_parts()))
+    if not parts_df.empty:
+        parts_df = _add_vessel_name(parts_df[parts_df["below_minimum"] == True].copy())
+
+    # ── Voyages ───────────────────────────────────────────────────────────────
+    voyages_raw = pd.DataFrame(transform_voyages(extract_voyages(full_load=False)))
+    voyages_df  = pd.DataFrame()
+    if not voyages_raw.empty:
+        voyages_raw["status"] = voyages_raw["arrival_date"].apply(
+            lambda x: "active" if x is None or pd.isna(x) else "completed"
+        )
+        voyages_df = _add_vessel_name(voyages_raw)
+
+    # ── Équipage & contrats ───────────────────────────────────────────────────
+    crew_df = pd.DataFrame()
+    try:
+        crew_raw2 = pd.DataFrame(transform_crew_members(extract_crew_members()))
+        if not crew_raw2.empty:
+            crew_raw2["crew_name"] = crew_raw2["first_name"].fillna("") + " " + crew_raw2["last_name"].fillna("")
+            crew_df = _add_vessel_name(crew_raw2[crew_raw2["contract_end"].notna()].copy())
+            crew_df = crew_df.sort_values("contract_end")
+    except Exception:
+        pass
+
+    # ── Tableau KPI par navire ────────────────────────────────────────────────
+    kpi_rows = []
+    for _, v in vessels_df.iterrows():
+        vid   = v["vessel_id"]
+        vname = v.get("vessel_name", "")
+
+        vh = hours_df[hours_df["vessel_id"] == vid] if not hours_df.empty else pd.DataFrame()
+        vj = jobs_df[jobs_df["vessel_id"]   == vid] if not jobs_df.empty  else pd.DataFrame()
+        vc = certs_df[certs_df["vessel_id"] == vid] if not certs_df.empty else pd.DataFrame()
+        vr = viol_df[viol_df["vessel_id"]   == vid] if not viol_df.empty  else pd.DataFrame()
+        vp = parts_df[parts_df["vessel_id"] == vid] if not parts_df.empty else pd.DataFrame()
+        vq = qhse_df[qhse_df["vessel_id"]   == vid] if not qhse_df.empty  else pd.DataFrame()
+        vcrew = crew_df[crew_df["vessel_id"] == vid] if not crew_df.empty  else pd.DataFrame()
+
+        eng_total = float(vh["hours_value"].max()) if not vh.empty else 0.0
+        cutoff7   = pd.Timestamp(today - timedelta(days=7))
+        eng_7d    = float(vh[vh["recorded_at"] >= cutoff7]["delta_hours"].sum()) if not vh.empty else 0.0
+
+        kpi_rows.append(dict(
+            vessel_id=vid, vessel_name=vname, kpi_date=today,
+            engine_hours_total=eng_total, engine_hours_last_7d=eng_7d,
+            jobs_open=int((vj["status"] == "open").sum())    if not vj.empty else 0,
+            jobs_overdue=int((vj["status"] == "overdue").sum()) if not vj.empty else 0,
+            certs_valid=int((vc["status"] == "valid").sum())          if not vc.empty else 0,
+            certs_expiring_30d=int((vc["days_until_expiry"].between(0, 30)).sum()) if not vc.empty else 0,
+            certs_expiring_7d=int((vc["days_until_expiry"].between(0, 7)).sum())   if not vc.empty else 0,
+            certs_expired=int((vc["status"] == "expired").sum())      if not vc.empty else 0,
+            rest_violations_30d=len(vr),
+            crew_onboard=len(vcrew),
+            parts_below_min=len(vp),
+            qhse_open=int((vq["status"] == "open").sum())      if not vq.empty else 0,
+            qhse_overdue=int((vq["status"] == "overdue").sum()) if not vq.empty else 0,
+        ))
+
+    kpi_df = pd.DataFrame(kpi_rows)
+
+    return dict(
+        kpi=kpi_df, certs=certs_df, jobs=jobs_df, hours=hours_df,
+        violations=viol_df, parts=parts_df, qhse=qhse_df,
+        voyages=voyages_df, crew=crew_df,
+    )
+
 
 def _mock_data():
     today = date.today()
