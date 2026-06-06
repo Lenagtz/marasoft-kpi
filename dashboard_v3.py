@@ -453,25 +453,22 @@ vessels = ["Tous"] + sorted(data["kpi"]["vessel_name"].tolist())
 
 # ─── HEADER FIXE ─────────────────────────────────────────────────────────────
 
-# Ligne 1 : titre + logos
-st.markdown(f"""
-<div style="background:{C_CREAM};padding:12px 8px 0 8px;
-            display:flex;align-items:center;justify-content:space-between;">
-    <div>
-        <span style="color:{C_GREEN};font-size:1.5rem;font-weight:700">⚓ Dashboard KPI Flotte</span>
-        <span style="color:{C_GRAY};font-size:0.78rem;margin-left:14px">
-            Mise à jour : {datetime.now().strftime("%d/%m/%Y %H:%M")}
-            {"&nbsp;·&nbsp;🧪 Mode démo" if MOCK_MODE else ""}
-        </span>
-    </div>
-    <div style="display:flex;align-items:center;gap:16px">
-        <img src="https://storage.googleapis.com/hostinger-horizons-assets-prod/d98c5fe9-b190-4a07-870f-677606696e62/d19a2551d7b59db361ce672d20503ff4.png"
-             style="height:38px;object-fit:contain">
-        <img src="https://marad.com/wp-content/uploads/2025/06/marad-logo-full-colour.png"
-             style="height:28px;object-fit:contain">
-    </div>
-</div>
-""", unsafe_allow_html=True)
+# Ligne 1 : titre + logos (HTML monoligne pour compatibilité Streamlit Cloud)
+_demo_badge = "&nbsp;·&nbsp;🧪 Mode démo" if MOCK_MODE else ""
+_now        = datetime.now().strftime("%d/%m/%Y %H:%M")
+st.markdown(
+    f'<div style="background:{C_CREAM};padding:12px 8px 0 8px;display:flex;align-items:center;justify-content:space-between;">'
+    f'<div>'
+    f'<span style="color:{C_GREEN};font-size:1.5rem;font-weight:700">⚓ Dashboard KPI Flotte</span>'
+    f'<span style="color:{C_GRAY};font-size:0.78rem;margin-left:14px">Mise à jour : {_now}{_demo_badge}</span>'
+    f'</div>'
+    f'<div style="display:flex;align-items:center;gap:16px">'
+    f'<img src="https://storage.googleapis.com/hostinger-horizons-assets-prod/d98c5fe9-b190-4a07-870f-677606696e62/d19a2551d7b59db361ce672d20503ff4.png" style="height:38px;object-fit:contain">'
+    f'<img src="https://marad.com/wp-content/uploads/2025/06/marad-logo-full-colour.png" style="height:28px;object-fit:contain">'
+    f'</div>'
+    f'</div>',
+    unsafe_allow_html=True,
+)
 
 # Ligne 2 : selectbox
 col_sel, col_info = st.columns([2, 5])
